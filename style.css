@@ -1,0 +1,26 @@
+/*
+Theme Name: Sahhaty Smart Health Coach
+Author: Sahhaty Team
+Version: 1.0.0
+Text Domain: sahhaty
+*/
+
+body {
+  font-family: 'Cairo', sans-serif;
+  background-color: #f3f4f6;
+}
+
+/* Hide scrollbar for clean UI */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Force English (Latin) digits where needed */
+input[type="number"],
+input[type="time"],
+input[type="tel"],
+.latin-digits {
+  direction: ltr;
+  unicode-bidi: plaintext;
+  font-family: Arial, sans-serif;
+  font-variant-numeric: lining-nums tabular-nums;
+}

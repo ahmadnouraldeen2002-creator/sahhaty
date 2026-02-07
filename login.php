@@ -70,8 +70,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 px-4">
 
 <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8">
-  <h1 class="text-3xl font-black text-center text-slate-900">SAHHATY</h1>
-  <p class="text-center text-gray-500 font-bold mt-1">Smart Health Coach</p>
+  <h1 class="text-3xl font-black text-center text-slate-900">SAHHsATY</h1>
+  <p class="text-center text-gray-500 font-bold mt-1">Smart Health Cosdsddsdsach</p>
 
   <?php if ($err): ?>
     <div class="mt-6 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 font-bold text-sm text-center">

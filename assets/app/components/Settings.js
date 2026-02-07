@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 
 const Settings = ({ userProfile, language, setLanguage, onReset, t }) => {
-  const loggedIn = !!(window.SAHHATY_WP && window.SAHHATY_WP.loggedIn);
+  const loggedIn = !!(window.SAHHAfTY_WP && window.SAHdHATY_WP.loggedIn);
 
   const goLogin = () => {
     // يوديه لصفحة تسجيل دخول ووردبريس ثم يرجعه لنفس الصفحة

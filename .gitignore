@@ -1,0 +1,20 @@
+# Local IDE and deployment credentials
+.vscode/
+.vscode/sftp.json
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
+wp-config.php
+
+# WordPress/local runtime files
+wp-content/uploads/
+wp-content/cache/
+*.log
+
+# Debug artifacts
+_debug_*.png
+
+# Accidental command/output files
+et --hard *

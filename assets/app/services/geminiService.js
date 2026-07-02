@@ -1,4 +1,4 @@
-const MODEL_NAME = 'gemini-3-flash-preview';
+const MODEL_NAME = 'gemini-1.5-flash';
 const getWpConfig = () => {
     if (!window.SAHHATY_WP?.ajaxUrl || !window.SAHHATY_WP?.nonce) {
         throw new Error("WordPress AI proxy is not configured");

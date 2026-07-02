@@ -142,7 +142,16 @@ function sahhaty_get_gemini_api_key() {
 }
 
 function sahhaty_get_client_ip() {
-  $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : 'unknown';
+  $ip = 'unknown';
+  if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+    $ip = $_SERVER['HTTP_CLIENT_IP'];
+  } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+    $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+    $ip = trim(end($ips));
+  } elseif (!empty($_SERVER['REMOTE_ADDR'])) {
+    $ip = $_SERVER['REMOTE_ADDR'];
+  }
+  $ip = sanitize_text_field(wp_unslash($ip));
   return preg_replace('/[^0-9a-fA-F:\.]/', '', $ip);
 }
 
@@ -183,7 +192,7 @@ function sahhaty_gemini_generate() {
 
   $model = defined('SAHHATY_GEMINI_MODEL') && SAHHATY_GEMINI_MODEL
     ? SAHHATY_GEMINI_MODEL
-    : 'gemini-3-flash-preview';
+    : 'gemini-1.5-flash';
 
   $body = [
     'contents' => [

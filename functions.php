@@ -19,12 +19,12 @@ add_action('wp_enqueue_scripts', function () {
  */
 add_action('wp_head', function () {
   echo "<script>window.process = window.process || { env: {} }; window.process.env = window.process.env || {};</script>\n";
-  
-    // ✅ AdSense هنا مرة واحدة
-    echo '<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7231927079579766" crossorigin="anonymous"></script>' . "\n";
 
-  
-    $ajax = admin_url('admin-ajax.php');
+  // ✅ AdSense هنا مرة واحدة
+  echo '<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7231927079579766" crossorigin="anonymous"></script>' . "\n";
+
+
+  $ajax = admin_url('admin-ajax.php');
   $nonce = wp_create_nonce('sahhaty_nonce');
   $loggedIn = is_user_logged_in() ? 'true' : 'false';
 
@@ -121,7 +121,28 @@ add_action('wp_ajax_nopriv_sahhaty_load_data', function () {
    Sahhaty - Server-side Gemini proxy
    =============================== */
 
-function sahhaty_get_gemini_api_key() {
+function sahhaty_read_env_file_key($var_name)
+{
+  $env_file = get_stylesheet_directory() . '/.env';
+  if (!file_exists($env_file))
+    return '';
+  $lines = file($env_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+  foreach ($lines as $line) {
+    $line = trim($line);
+    if ($line === '' || $line[0] === '#')
+      continue;
+    if (strpos($line, '=') === false)
+      continue;
+    list($name, $value) = explode('=', $line, 2);
+    if (trim($name) === $var_name) {
+      return trim($value);
+    }
+  }
+  return '';
+}
+
+function sahhaty_get_gemini_api_key()
+{
   $keys = [
     defined('SAHHATY_GEMINI_API_KEY') ? SAHHATY_GEMINI_API_KEY : '',
     defined('SAHHATY_API_KEY') ? SAHHATY_API_KEY : '',
@@ -129,6 +150,10 @@ function sahhaty_get_gemini_api_key() {
     getenv('GEMINI_API_KEY'),
     getenv('GOOGLE_API_KEY'),
     getenv('SAHHATY_API_KEY'),
+    // Fallback: read directly from theme .env file
+    sahhaty_read_env_file_key('SAHHATY_GEMINI_API_KEY'),
+    sahhaty_read_env_file_key('GEMINI_API_KEY'),
+    sahhaty_read_env_file_key('SAHHATY_API_KEY'),
   ];
 
   foreach ($keys as $key) {
@@ -141,7 +166,8 @@ function sahhaty_get_gemini_api_key() {
   return '';
 }
 
-function sahhaty_get_client_ip() {
+function sahhaty_get_client_ip()
+{
   $ip = 'unknown';
   if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
     $ip = $_SERVER['HTTP_CLIENT_IP'];
@@ -155,7 +181,8 @@ function sahhaty_get_client_ip() {
   return preg_replace('/[^0-9a-fA-F:\.]/', '', $ip);
 }
 
-function sahhaty_ai_rate_limit($scope, $limit = 30, $window = HOUR_IN_SECONDS) {
+function sahhaty_ai_rate_limit($scope, $limit = 30, $window = HOUR_IN_SECONDS)
+{
   $key = 'sahhaty_ai_' . md5($scope . '|' . sahhaty_get_client_ip());
   $count = (int) get_transient($key);
 
@@ -166,14 +193,19 @@ function sahhaty_ai_rate_limit($scope, $limit = 30, $window = HOUR_IN_SECONDS) {
   set_transient($key, $count + 1, $window);
 }
 
-function sahhaty_gemini_generate() {
-  check_ajax_referer('sahhaty_nonce', 'nonce');
+function sahhaty_gemini_generate()
+{
+  $nonce = isset($_REQUEST['nonce']) ? sanitize_text_field(wp_unslash($_REQUEST['nonce'])) : '';
+  if (!wp_verify_nonce($nonce, 'sahhaty_nonce')) {
+    wp_send_json_error(['code' => 'invalid_nonce', 'message' => 'Security check failed.'], 403);
+  }
   sahhaty_ai_rate_limit('gemini_generate');
 
   $api_key = sahhaty_get_gemini_api_key();
   if ($api_key === '') {
     wp_send_json_error(['code' => 'missing_gemini_api_key', 'message' => 'Gemini API key is not configured.'], 500);
   }
+  $debug_key = sprintf("Length: %d, Start: %s, End: %s", strlen($api_key), substr($api_key, 0, 8), substr($api_key, -8));
 
   $raw = file_get_contents('php://input');
   $data = json_decode($raw, true);
@@ -206,18 +238,21 @@ function sahhaty_gemini_generate() {
   ];
 
   if ($response_mime !== '') {
-    $body['generationConfig'] = ['responseMimeType' => $response_mime];
+    $body['generationConfig'] = ['response_mime_type' => $response_mime];
   }
 
-  $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($model) . ':generateContent?key=' . rawurlencode($api_key);
+  $url = 'https://generativelanguage.googleapis.com/v1/models/' . rawurlencode($model) . ':generateContent';
   $response = wp_remote_post($url, [
     'timeout' => 60,
-    'headers' => ['Content-Type' => 'application/json'],
+    'headers' => [
+      'Content-Type' => 'application/json',
+      'x-goog-api-key' => $api_key,
+    ],
     'body' => wp_json_encode($body, JSON_UNESCAPED_UNICODE),
   ]);
 
   if (is_wp_error($response)) {
-    wp_send_json_error(['code' => 'gemini_http_error', 'message' => $response->get_error_message()], 502);
+    wp_send_json_error(['code' => 'gemini_http_error', 'message' => $response->get_error_message() . ' (Debug key: ' . $debug_key . ')'], 502);
   }
 
   $status = (int) wp_remote_retrieve_response_code($response);
@@ -225,7 +260,11 @@ function sahhaty_gemini_generate() {
 
   if ($status < 200 || $status >= 300) {
     $message = isset($response_body['error']['message']) ? $response_body['error']['message'] : 'Gemini API request failed.';
-    wp_send_json_error(['code' => 'gemini_api_error', 'message' => $message], 502);
+    wp_send_json_error([
+      'code' => 'gemini_api_error',
+      'message' => $message . ' (Debug key: ' . $debug_key . ')',
+      'response' => $response_body
+    ], 502);
   }
 
   $text = $response_body['candidates'][0]['content']['parts'][0]['text'] ?? '';

@@ -18,23 +18,7 @@ add_action('wp_enqueue_scripts', function () {
  * Print Import Map + env shim in <head>.
  */
 add_action('wp_head', function () {
-  // Supports the new key name, the old key name, and Docker/.env values.
-  $key = '';
-  if (defined('SAHHATY_GEMINI_API_KEY') && SAHHATY_GEMINI_API_KEY) {
-    $key = SAHHATY_GEMINI_API_KEY;
-  } elseif (defined('SAHHATY_API_KEY') && SAHHATY_API_KEY) {
-    $key = SAHHATY_API_KEY;
-  } elseif (getenv('SAHHATY_GEMINI_API_KEY')) {
-    $key = getenv('SAHHATY_GEMINI_API_KEY');
-  } elseif (getenv('GEMINI_API_KEY')) {
-    $key = getenv('GEMINI_API_KEY');
-  } elseif (getenv('SAHHATY_API_KEY')) {
-    $key = getenv('SAHHATY_API_KEY');
-  }
-
-  $key_js = json_encode($key, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-  echo "<script>window.process = window.process || { env: {} }; window.process.env = window.process.env || {}; window.process.env.API_KEY = {$key_js};</script>\n";
+  echo "<script>window.process = window.process || { env: {} }; window.process.env = window.process.env || {};</script>\n";
   
     // ✅ AdSense هنا مرة واحدة
     echo '<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7231927079579766" crossorigin="anonymous"></script>' . "\n";
@@ -59,7 +43,6 @@ add_action('wp_head', function () {
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
     "recharts": "https://esm.sh/recharts@^3.6.0",
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
@@ -133,3 +116,116 @@ add_action('wp_ajax_nopriv_sahhaty_save_data', function () {
 add_action('wp_ajax_nopriv_sahhaty_load_data', function () {
   wp_send_json_success(['data' => null]);
 });
+
+/* ===============================
+   Sahhaty - Server-side Gemini proxy
+   =============================== */
+
+function sahhaty_get_gemini_api_key() {
+  $keys = [
+    defined('SAHHATY_GEMINI_API_KEY') ? SAHHATY_GEMINI_API_KEY : '',
+    defined('SAHHATY_API_KEY') ? SAHHATY_API_KEY : '',
+    getenv('SAHHATY_GEMINI_API_KEY'),
+    getenv('GEMINI_API_KEY'),
+    getenv('GOOGLE_API_KEY'),
+    getenv('SAHHATY_API_KEY'),
+  ];
+
+  foreach ($keys as $key) {
+    $key = is_string($key) ? trim($key) : '';
+    if ($key !== '' && stripos($key, 'put-your') === false && stripos($key, 'change-me') === false) {
+      return $key;
+    }
+  }
+
+  return '';
+}
+
+function sahhaty_get_client_ip() {
+  $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : 'unknown';
+  return preg_replace('/[^0-9a-fA-F:\.]/', '', $ip);
+}
+
+function sahhaty_ai_rate_limit($scope, $limit = 30, $window = HOUR_IN_SECONDS) {
+  $key = 'sahhaty_ai_' . md5($scope . '|' . sahhaty_get_client_ip());
+  $count = (int) get_transient($key);
+
+  if ($count >= $limit) {
+    wp_send_json_error(['code' => 'rate_limited', 'message' => 'Too many AI requests. Try again later.'], 429);
+  }
+
+  set_transient($key, $count + 1, $window);
+}
+
+function sahhaty_gemini_generate() {
+  check_ajax_referer('sahhaty_nonce', 'nonce');
+  sahhaty_ai_rate_limit('gemini_generate');
+
+  $api_key = sahhaty_get_gemini_api_key();
+  if ($api_key === '') {
+    wp_send_json_error(['code' => 'missing_gemini_api_key', 'message' => 'Gemini API key is not configured.'], 500);
+  }
+
+  $raw = file_get_contents('php://input');
+  $data = json_decode($raw, true);
+  if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+    wp_send_json_error(['code' => 'invalid_json', 'message' => 'Invalid JSON payload.'], 400);
+  }
+
+  $prompt = isset($data['prompt']) && is_string($data['prompt']) ? trim($data['prompt']) : '';
+  if ($prompt === '' || strlen($prompt) > 30000) {
+    wp_send_json_error(['code' => 'invalid_prompt', 'message' => 'Prompt is empty or too large.'], 400);
+  }
+
+  $response_mime = isset($data['responseMimeType']) && is_string($data['responseMimeType'])
+    ? sanitize_text_field($data['responseMimeType'])
+    : '';
+
+  $model = defined('SAHHATY_GEMINI_MODEL') && SAHHATY_GEMINI_MODEL
+    ? SAHHATY_GEMINI_MODEL
+    : 'gemini-3-flash-preview';
+
+  $body = [
+    'contents' => [
+      [
+        'role' => 'user',
+        'parts' => [
+          ['text' => $prompt],
+        ],
+      ],
+    ],
+  ];
+
+  if ($response_mime !== '') {
+    $body['generationConfig'] = ['responseMimeType' => $response_mime];
+  }
+
+  $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($model) . ':generateContent?key=' . rawurlencode($api_key);
+  $response = wp_remote_post($url, [
+    'timeout' => 60,
+    'headers' => ['Content-Type' => 'application/json'],
+    'body' => wp_json_encode($body, JSON_UNESCAPED_UNICODE),
+  ]);
+
+  if (is_wp_error($response)) {
+    wp_send_json_error(['code' => 'gemini_http_error', 'message' => $response->get_error_message()], 502);
+  }
+
+  $status = (int) wp_remote_retrieve_response_code($response);
+  $response_body = json_decode(wp_remote_retrieve_body($response), true);
+
+  if ($status < 200 || $status >= 300) {
+    $message = isset($response_body['error']['message']) ? $response_body['error']['message'] : 'Gemini API request failed.';
+    wp_send_json_error(['code' => 'gemini_api_error', 'message' => $message], 502);
+  }
+
+  $text = $response_body['candidates'][0]['content']['parts'][0]['text'] ?? '';
+  if (!is_string($text) || $text === '') {
+    wp_send_json_error(['code' => 'empty_gemini_response', 'message' => 'Gemini returned an empty response.'], 502);
+  }
+
+  wp_send_json_success(['text' => $text]);
+}
+
+add_action('wp_ajax_sahhaty_gemini_generate', 'sahhaty_gemini_generate');
+add_action('wp_ajax_nopriv_sahhaty_gemini_generate', 'sahhaty_gemini_generate');

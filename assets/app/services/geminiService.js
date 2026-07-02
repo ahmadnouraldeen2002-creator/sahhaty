@@ -1,23 +1,29 @@
-import { GoogleGenAI } from "@google/genai";
 const MODEL_NAME = 'gemini-3-flash-preview';
-let aiClient = null;
-const getApiKey = () => {
-    if (typeof process === 'undefined' || !process?.env?.API_KEY)
-        return '';
-    return String(process.env.API_KEY).trim();
-};
-const isPlaceholderKey = (apiKey) => {
-    const lower = apiKey.toLowerCase();
-    return lower.includes('put-your') || lower.includes('change-me') || lower.includes('your-api-key');
-};
-const getAiClient = () => {
-    const apiKey = getApiKey();
-    if (!apiKey || isPlaceholderKey(apiKey))
-        return null;
-    if (!aiClient) {
-        aiClient = new GoogleGenAI({ apiKey });
+const getWpConfig = () => {
+    if (!window.SAHHATY_WP?.ajaxUrl || !window.SAHHATY_WP?.nonce) {
+        throw new Error("WordPress AI proxy is not configured");
     }
-    return aiClient;
+    return window.SAHHATY_WP;
+};
+const callSahhatyGemini = async (prompt, responseMimeType = '') => {
+    const wp = getWpConfig();
+    const res = await fetch(
+        `${wp.ajaxUrl}?action=sahhaty_gemini_generate&nonce=${encodeURIComponent(wp.nonce)}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, responseMimeType, model: MODEL_NAME }),
+        }
+    );
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+        const code = json?.data?.code;
+        if (code === 'missing_gemini_api_key') {
+            throw new Error("Missing Gemini API key");
+        }
+        throw new Error(json?.data?.message || "Gemini request failed");
+    }
+    return json.data.text;
 };
 /**
  * Helper to clean JSON string if the model wraps it in markdown blocks
@@ -32,10 +38,6 @@ const cleanJson = (text) => {
  * Generates an initial health plan (Diet + Workout) based on user profile.
  */
 export const generateInitialPlan = async (profile) => {
-    const client = getAiClient();
-    if (!client) {
-        throw new Error("Missing Gemini API key");
-    }
     // STRICT LANGUAGE ENFORCEMENT
     let targetLanguage = 'English';
     if (profile.language === 'ar' || profile.language === 'Arabic')
@@ -111,18 +113,9 @@ export const generateInitialPlan = async (profile) => {
     }
   `;
     try {
-        // Create a timeout promise that rejects after 45 seconds
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 45000));
-        // Race the API call against the timeout
-        const apiCall = client.models.generateContent({
-            model: MODEL_NAME,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-            }
-        });
-        const response = await Promise.race([apiCall, timeoutPromise]);
-        const cleanedText = cleanJson(response.text || "{}");
+        const responseText = await Promise.race([callSahhatyGemini(prompt, "application/json"), timeoutPromise]);
+        const cleanedText = cleanJson(responseText || "{}");
         return JSON.parse(cleanedText);
     }
     catch (error) {
@@ -134,7 +127,6 @@ export const generateInitialPlan = async (profile) => {
  * Chat with the AI Coach.
  */
 export const chatWithCoach = async (currentMessage, history, profile, dietPlan, workoutPlan) => {
-    const client = getAiClient();
     let targetLanguage = 'English';
     if (profile?.language === 'ar' || profile?.language === 'Arabic')
         targetLanguage = 'Arabic';
@@ -177,22 +169,20 @@ export const chatWithCoach = async (currentMessage, history, profile, dietPlan, 
        - Be precise. Do not just say "Eat bananas". Say "Eat 3 large bananas (approx 400g)".
     3. Be encouraging.
   `;
-    // Convert history to Gemini format
-    const recentHistory = history.slice(-10).map(msg => ({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }]
-    }));
+    const recentHistory = history.slice(-10)
+        .map(msg => `${msg.role === 'user' ? 'User' : 'Coach'}: ${msg.text}`)
+        .join('\n');
+    const prompt = `${systemInstruction}
+
+Recent conversation:
+${recentHistory}
+
+User message:
+${currentMessage}
+
+Reply only with the coach response in ${targetLanguage}.`;
     try {
-        if (!client) {
-            throw new Error("Missing Gemini API key");
-        }
-        const chat = client.chats.create({
-            model: MODEL_NAME,
-            config: { systemInstruction },
-            history: recentHistory,
-        });
-        const result = await chat.sendMessage({ message: currentMessage });
-        return result.text;
+        return await callSahhatyGemini(prompt);
     }
     catch (error) {
         console.error("Chat error:", error);

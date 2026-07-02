@@ -1,4 +1,4 @@
-import { jsx as _jsx } from "react/jsx-runtime";
+﻿import { jsx as _jsx } from "react/jsx-runtime";
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.js';
@@ -8,10 +8,10 @@ if (!rootElement) {
 }
 async function sahhatyLoad() {
   if (!window.SAHHATY_WP) return null;
-  if (!SAHHATY_WP.loggedIn) return null; // ✅ إذا ضيف لا نحمّل من WP
+  if (!window.SAHHATY_WP.loggedIn) return null; // âœ… Ø¥Ø°Ø§ Ø¶ÙŠÙ Ù„Ø§ Ù†Ø­Ù…Ù‘Ù„ Ù…Ù† WP
 
   const res = await fetch(
-    SAHHATY_WP.ajaxUrl + '?action=sahhaty_load_data&nonce=' + SAHHATY_WP.nonce,
+    window.SAHHATY_WP.ajaxUrl + '?action=sahhaty_load_data&nonce=' + window.SAHHATY_WP.nonce,
     { method: 'POST' }
   );
 
@@ -22,10 +22,10 @@ async function sahhatyLoad() {
 
 async function sahhatySave(data) {
   if (!window.SAHHATY_WP) return;
-  if (!SAHHATY_WP.loggedIn) return; // ✅ الضيف لا نحفظ له على WP
+  if (!window.SAHHATY_WP.loggedIn) return; // âœ… Ø§Ù„Ø¶ÙŠÙ Ù„Ø§ Ù†Ø­ÙØ¸ Ù„Ù‡ Ø¹Ù„Ù‰ WP
 
   await fetch(
-    SAHHATY_WP.ajaxUrl + '?action=sahhaty_save_data&nonce=' + SAHHATY_WP.nonce,
+    window.SAHHATY_WP.ajaxUrl + '?action=sahhaty_save_data&nonce=' + window.SAHHATY_WP.nonce,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -53,4 +53,5 @@ sahhatyLoad()
     console.error('sahhatyLoad failed:', error);
     mountApp(null);
   });
+
 
